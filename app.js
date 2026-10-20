@@ -25,8 +25,10 @@ function draw(key, arr, n) {
 }
 
 let me = { id: '', name: '' }, isHost = false, code = '', peer = null, hostConn = null, H = null, conns = {}, cur = { key: '' };
-try { me.id = localStorage.getItem('pn-id') || ''; me.name = localStorage.getItem('pn-name') || ''; } catch (e) {}
-if (!me.id) { me.id = rid(); try { localStorage.setItem('pn-id', me.id); } catch (e) {} }
+/* name is remembered across visits; the player id is per tab (sessionStorage) so two tabs on one device are two different players */
+try { me.name = localStorage.getItem('pn-name') || ''; } catch (e) {}
+try { me.id = sessionStorage.getItem('pn-id') || ''; } catch (e) {}
+if (!me.id) { me.id = rid(); try { sessionStorage.setItem('pn-id', me.id); } catch (e) {} }
 
 /* ---------- client rendering ---------- */
 const openD = {};   /* remembers which collapsible sections the player opened, across re-renders */
@@ -136,13 +138,16 @@ function goJoin() {
   const c = document.getElementById('cd').value.trim().toLowerCase();
   if (c.length !== 4) return home('Enter the 4-letter code.');
   code = c.toUpperCase();
+  show({ key: 'joining', html: `<h1>Joining<span>.</span></h1><p class="mute">Connecting to room ${esc(code)}…</p><button class="alt" data-a="reload">Cancel</button>` });
+  const jt = setTimeout(() => err('Couldn’t reach that room. Check the code, and make sure the host still has the game open.'), 12000);
   peer = new Peer();
-  peer.on('error', e => err(e.type === 'peer-unavailable' ? 'No game found with that code.' : 'Connection problem (' + e.type + ').'));
+  peer.on('error', e => { clearTimeout(jt); err(e.type === 'peer-unavailable' ? 'No game found with that code.' : 'Connection problem (' + e.type + ').'); });
   peer.on('open', () => {
     hostConn = peer.connect('partyhub-' + c, { reliable: true });
     hostConn.on('open', () => hostConn.send({ t: 'join', id: me.id, name: me.name }));
-    hostConn.on('data', d => { if (d.t === 'view') show(d.v); });
-    hostConn.on('close', () => err('Lost connection to the host.'));
+    hostConn.on('data', d => { if (d.t === 'view') { clearTimeout(jt); show(d.v); } });
+    hostConn.on('error', () => { clearTimeout(jt); err('Couldn’t connect to the host.'); });
+    hostConn.on('close', () => { clearTimeout(jt); err('Lost connection to the host.'); });
   });
 }
 function hostMsg(c, d) {
